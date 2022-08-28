@@ -70,6 +70,34 @@ impl EcommerceContract {
     pub fn get_order(&self, order_id: OrderId) -> Order {
         self.orders.get(&order_id).expect("NOT_FOUND_ORDER_ID")
     }
+
+    #[payable]
+    pub fn refund_order(&mut self, order_id: OrderId) -> PromiseOrValue<U128> {
+        // Lay don hang
+        let order: Order = self.get_order(order_id.clone());
+        
+        // Kiem tra don hang da duoc thanh toan chua
+        assert!(order.is_completed, "ERROR_THE_ORDER_IS_NOT_COMPLETED_YET");
+
+        // Kiem tra owner con du tien tra khong
+        assert!(env::attached_deposit() >= order.amount, "ERROR_DEPOSIT_NOT_ENOUGH");
+
+        // Huy don hang
+        // self.orders.remove(&order_id);
+        self.orders.insert(&order.order_id, &Order {
+            order_id: order.order_id.clone(), 
+            payer_id: order.payer_id,
+            amount: order.amount,
+            received_amount: order.received_amount,
+            is_completed: order.is_completed, 
+            is_refund: true, 
+            created_at: order.created_at
+        });
+        
+        // Tra lai tien cho khach
+        Promise::new(env::signer_account_id()).transfer(env::attached_deposit() - order.amount);
+        PromiseOrValue::Value(U128(env::attached_deposit() - order.amount))
+    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -130,5 +158,30 @@ mod tests {
         let mut contract = EcommerceContract::new(alice.clone());
         let order_amount = U128(2000);
         contract.pay_order("order_1".to_owned(), order_amount);
+    }
+
+    #[test]
+    // #[should_panic(expected = "NOT_FOUND_ORDER_ID")]
+    fn test_refund_sucessfull() {
+        let mut context = get_context(false);
+        let alice: AccountId = accounts(0);
+
+        context.account_balance(1000)
+        .predecessor_account_id(alice.clone())
+        .attached_deposit(1000)
+        .signer_account_id(alice.clone());
+
+        testing_env!(context.build());
+
+        let mut contract = EcommerceContract::new(alice.clone());
+        let order_amount = U128(1000);
+        contract.pay_order("order_1".to_owned(), order_amount);
+
+        
+        // test
+        contract.refund_order("order_1".to_owned());
+        let order = contract.get_order("order_1".to_owned());
+        assert_eq!(order.is_refund, true);
+        // contract.get_order("order_1".to_owned());
     }
 }
